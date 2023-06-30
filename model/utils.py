@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 from torch.nn.functional import binary_cross_entropy 
 import numpy as np 
 from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import accuracy_score
 
 ##data preprocessing
 def dataframe_to_torch(dataframe, input_cols, output_cols):
@@ -65,9 +66,9 @@ def plot_losses(history):
 
 #Accuracy metric
 def accuracy(outputs, targets):
-    rounded_predictions = torch.round(outputs)
-    accuracy = torch.Tensor((rounded_predictions == targets).sum().item() / len(targets))
-    return accuracy
+    predictions = torch.round(outputs)
+    accuracy_ = torch.from_numpy(np.asarray(accuracy_score(targets, predictions)).astype(np.float32()))
+    return accuracy_
 
 #classification module
 class RemClassificationBase(nn.Module):

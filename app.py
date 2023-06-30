@@ -10,4 +10,3 @@ while True:
     state = torch.tensor()
     ##Evaluate state
     if model(state): #One hot encoded answer.
-        ##Send notification
