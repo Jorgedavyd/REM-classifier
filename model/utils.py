@@ -2,6 +2,22 @@ import torch.nn as nn
 import torch
 import matplotlib.pyplot as plt
 from torch.nn.functional import binary_cross_entropy 
+import numpy as np 
+from sklearn.preprocessing import StandardScaler
+
+##data preprocessing
+def dataframe_to_torch(dataframe, input_cols, output_cols):
+    # Make a copy of the original dataframe
+    dataframe1 = dataframe.copy(deep=True)
+    # Extract input & outupts as numpy arrays
+    inputs_array = dataframe1[input_cols].to_numpy()
+    targets_array = dataframe1[output_cols].to_numpy()
+    #Normalizing the dataset
+    inputs_norm = StandardScaler().fit_transform(inputs_array)
+    #Creating torch tensors
+    inputs = torch.from_numpy(inputs_norm.astype(np.float32()))
+    targets = torch.from_numpy(targets_array.astype(np.float32()))
+    return inputs, targets
 
 ## GPU usage
 
@@ -47,66 +63,82 @@ def plot_losses(history):
     plt.legend()
     plt.show()
 
+#Accuracy metric
+def accuracy(outputs, targets):
+    rounded_predictions = torch.round(outputs)
+    accuracy = torch.Tensor((rounded_predictions == targets).sum().item() / len(targets))
+    return accuracy
 
 #classification module
 class RemClassificationBase(nn.Module):
     def training_step(self, batch):
-        input, target = batch
-        out = self(input)                  # Generar predicciones
-        loss = binary_cross_entropy(out, target) # Calcular el costo
+        inputs, targets = batch
+        # Reshape target tensor to match the input size
+        target_tensor = targets.unsqueeze(1)  # Add a new dimension
+        target_tensor = target_tensor.expand(-1, 1)  # Duplicate values across second dimension
+        out = self(inputs)                  # Generar predicciones
+        loss = binary_cross_entropy(out, target_tensor) # Calcular el costo
         return loss
 
     def validation_step(self, batch):
-        input, target = batch
-        out = self(input)                    # Generar predicciones
-        loss = binary_cross_entropy(out, target)   # Calcular el costo
-        return {'val_loss': loss.detach()}
+        inputs, targets = batch
+        target_tensor = targets.unsqueeze(1)  # Add a new dimension
+        target_tensor = target_tensor.expand(-1, 1)  # Duplicate values across second dimension
+        out = self(inputs)                    # Generar predicciones
+        loss = binary_cross_entropy(out, target_tensor)   # Calcular el costo
+        acc = accuracy(out, targets) #Calcular la precisión
+        return {'val_loss': loss.detach(), 'val_acc': acc}
 
     def validation_epoch_end(self, outputs):
         batch_losses = [x['val_loss'] for x in outputs]
         epoch_loss = torch.stack(batch_losses).mean()   # Sacar el valor expectado de todo el conjunto de costos
-        return {'val_loss': epoch_loss.item()}
+        batch_acc = [x['val_acc'] for x in outputs]
+        epoch_acc = torch.stack(batch_acc).mean()   # Sacar el valor expectado de todo el conjunto de precisión
+        return {'val_loss': epoch_loss.item(), 'val_acc': epoch_acc.item()}
 
     def epoch_end(self, epoch, result): # Seguimiento del entrenamiento
-        print("Epoch [{}], last_lr: {:.5f}, train_loss: {:.4f}, val_loss: {:.4f}".format(
-            epoch, result['lrs'][-1], result['train_loss'], result['val_loss']))
+        print("Epoch [{}], last_lr: {:.5f}, train_loss: {:.4f}, val_loss: {:.4f}, val_acc: {:.4f}".format(
+            epoch, result['lrs'][-1], result['train_loss'], result['val_loss'], result['val_acc']))
 
 ## Model module
 
 # Here we can change the model architecture.
-def  SingularLayer(input, output):
+def  SingularLayer(input_size, output):
     out = nn.Sequential(
-        nn.Linear(input, output),
+        nn.Linear(input_size, output),
         nn.ReLU(True)
     )
     return out
 
 class DeepNeuralNetwork(RemClassificationBase):
-    def __init__(self, input = 3, *args):
+    def __init__(self, input_size = 4, *args):
         super(DeepNeuralNetwork, self).__init__()
         
         self.overall_structure = nn.Sequential()
         #Model input and hidden layer
         for num, output in enumerate(args):
-            self.overall_structure.add_module(name = f'layer_{num+1}', module = SingularLayer(input, output))
-            input = output
+            self.overall_structure.add_module(name = f'layer_{num+1}', module = SingularLayer(input_size, output))
+            input_size = output
 
         #Model output layer
         self.output_layer = nn.Sequential(
-                nn.Linear(input, 1),
+                nn.Linear(input_size, 1),
                 nn.Sigmoid()
             )
     def forward(self, xb):
         out = self.overall_structure(xb)
-        out = self.output_layer(xb)
+        out = self.output_layer(out)
         return out
+    
 
 @torch.no_grad()
+#Validation process
 def evaluate(model, val_loader):
     model.eval()
     outputs = [model.validation_step(batch) for batch in val_loader]
-    return model.validation_epoch_end(outputs)
 
+    return model.validation_epoch_end(outputs)
+#Training process
 def get_lr(optimizer):
     for param_group in optimizer.param_groups:
         return param_group['lr'] # Seguimiento del learning rate
