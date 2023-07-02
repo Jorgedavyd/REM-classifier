@@ -20,6 +20,20 @@ def dataframe_to_torch(dataframe, input_cols, output_cols):
     targets = torch.from_numpy(targets_array.astype(np.float32()))
     return inputs, targets
 
+def scaler(dataframe, input_cols):
+    # Make a copy of the original dataframe
+    dataframe1 = dataframe.copy(deep=True)
+    # Extract input & outupts as numpy arrays
+    inputs_array = dataframe1[input_cols].to_numpy()
+    #Normalizing the dataset
+    preprocess = StandardScaler().fit(inputs_array)
+    return preprocess
+
+def transform(scaler, data):
+    out = scaler(data)
+    out = torch.from_numpy(out.astype(np.float32()))
+    return out
+
 ## GPU usage
 
 def get_default_device():
@@ -97,10 +111,13 @@ class RemClassificationBase(nn.Module):
         epoch_acc = torch.stack(batch_acc).mean()   # Sacar el valor expectado de todo el conjunto de precisión
         return {'val_loss': epoch_loss.item(), 'val_acc': epoch_acc.item()}
 
-    def epoch_end(self, epoch, result): # Seguimiento del entrenamiento
+    def epoch_end_one_cycle(self, epoch, result): # Seguimiento del entrenamiento
         print("Epoch [{}], last_lr: {:.5f}, train_loss: {:.4f}, val_loss: {:.4f}, val_acc: {:.4f}".format(
             epoch, result['lrs'][-1], result['train_loss'], result['val_loss'], result['val_acc']))
 
+    def epoch_end(self, epoch, result): # Seguimiento del entrenamiento
+        print("Epoch [{}], train_loss: {:.4f}, val_loss: {:.4f}, val_acc: {:.4f}".format(
+            epoch, result['train_loss'], result['val_loss'], result['val_acc']))
 ## Model module
 
 # Here we can change the model architecture.
@@ -144,7 +161,7 @@ def get_lr(optimizer):
     for param_group in optimizer.param_groups:
         return param_group['lr'] # Seguimiento del learning rate
 
-def fit(epochs, max_lr, model, train_loader, val_loader,
+def fit_one_cycle(epochs, max_lr, model, train_loader, val_loader,
                   weight_decay=0, grad_clip=False, opt_func=torch.optim.Adam):
     torch.cuda.empty_cache()
     history = [] # Seguimiento de entrenamiento
@@ -185,6 +202,41 @@ def fit(epochs, max_lr, model, train_loader, val_loader,
         result = evaluate(model, val_loader)
         result['train_loss'] = torch.stack(train_losses).mean().item() #Stackea todos los costos de las iteraciones sobre los batches y los guarda como la pérdida general de la época
         result['lrs'] = lrs #Guarda la lista de learning rates de cada batch
+        model.epoch_end_one_cycle(epoch, result) #imprimir en pantalla el seguimiento
+        history.append(result) # añadir a la lista el diccionario de resultados
+    return history
+
+def fit(epochs, lr, model, train_loader, val_loader,
+                  weight_decay=0, grad_clip=False, opt_func=torch.optim.Adam):
+    torch.cuda.empty_cache()
+    history = [] # Seguimiento de entrenamiento
+
+    # Poner el método de minimización personalizado
+    optimizer = opt_func(model.parameters(), lr, weight_decay=weight_decay)
+
+    for epoch in range(epochs):
+        # Training Phase
+        model.train()  #Activa calcular los vectores gradiente
+        train_losses = []
+        for batch in train_loader:
+            # Calcular el costo
+            loss = model.training_step(batch)
+            #Seguimiento
+            train_losses.append(loss)
+            #Calcular las derivadas parciales
+            loss.backward()
+
+            # Gradient clipping, para que no ocurra el exploding gradient
+            if grad_clip:
+                nn.utils.clip_grad_value_(model.parameters(), grad_clip)
+
+            #Efectuar el descensod e gradiente y borrar el historial
+            optimizer.step()
+            optimizer.zero_grad()
+
+        # Fase de validación
+        result = evaluate(model, val_loader)
+        result['train_loss'] = torch.stack(train_losses).mean().item() #Stackea todos los costos de las iteraciones sobre los batches y los guarda como la pérdida general de la época
         model.epoch_end(epoch, result) #imprimir en pantalla el seguimiento
         history.append(result) # añadir a la lista el diccionario de resultados
     return history
