@@ -5,6 +5,9 @@ from torch.nn.functional import binary_cross_entropy
 import numpy as np 
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import accuracy_score
+from tqdm import tqdm
+from collections import Counter
+from sklearn.metrics import f1_score
 
 ##data preprocessing
 def dataframe_to_torch(dataframe, input_cols, output_cols):
@@ -83,6 +86,11 @@ def accuracy(outputs, targets):
     predictions = torch.round(outputs)
     accuracy_ = torch.from_numpy(np.asarray(accuracy_score(targets, predictions)).astype(np.float32()))
     return accuracy_
+#F1 Score metric
+def F1_score(outputs, targets):
+    predictions = torch.round(outputs)
+    score = torch.from_numpy(np.asarray(f1_score(targets, predictions)).astype(np.float32()))
+    return score
 
 #classification module
 class RemClassificationBase(nn.Module):
@@ -102,22 +110,25 @@ class RemClassificationBase(nn.Module):
         out = self(inputs)                    # Generar predicciones
         loss = binary_cross_entropy(out, target_tensor)   # Calcular el costo
         acc = accuracy(out, targets) #Calcular la precisión
-        return {'val_loss': loss.detach(), 'val_acc': acc}
+        score = F1_score(out, targets) 
+        return {'val_loss': loss.detach(), 'val_acc': acc, 'f1_score': score}
 
     def validation_epoch_end(self, outputs):
         batch_losses = [x['val_loss'] for x in outputs]
         epoch_loss = torch.stack(batch_losses).mean()   # Sacar el valor expectado de todo el conjunto de costos
         batch_acc = [x['val_acc'] for x in outputs]
         epoch_acc = torch.stack(batch_acc).mean()   # Sacar el valor expectado de todo el conjunto de precisión
-        return {'val_loss': epoch_loss.item(), 'val_acc': epoch_acc.item()}
+        batch_score = [x['f1_score'] for x in outputs]
+        epoch_score = torch.stack(batch_score).mean()
+        return {'val_loss': epoch_loss.item(), 'val_acc': epoch_acc.item(), 'f1_score': epoch_score.item()}
 
     def epoch_end_one_cycle(self, epoch, result): # Seguimiento del entrenamiento
-        print("Epoch [{}], last_lr: {:.5f}, train_loss: {:.4f}, val_loss: {:.4f}, val_acc: {:.4f}".format(
-            epoch, result['lrs'][-1], result['train_loss'], result['val_loss'], result['val_acc']))
+        print("Epoch [{}], last_lr: {:.5f}, train_loss: {:.4f}, val_loss: {:.4f}, val_acc: {:.4f}, f1_score: {:.4f}".format(
+            epoch, result['lrs'][-1], result['train_loss'], result['val_loss'], result['val_acc'], result['f1_score']))
 
     def epoch_end(self, epoch, result): # Seguimiento del entrenamiento
-        print("Epoch [{}], train_loss: {:.4f}, val_loss: {:.4f}, val_acc: {:.4f}".format(
-            epoch, result['train_loss'], result['val_loss'], result['val_acc']))
+        print("Epoch [{}], train_loss: {:.4f}, val_loss: {:.4f}, val_acc: {:.4f}, f1_score: {:.4f}".format(
+            epoch, result['train_loss'], result['val_loss'], result['val_acc'], result['f1_score']))
 ## Model module
 
 # Here we can change the model architecture.
@@ -148,7 +159,62 @@ class DeepNeuralNetwork(RemClassificationBase):
         out = self.output_layer(out)
         return out
     
+class LSTMModel(nn.Module):
+    def __init__(self, input_size, hidden_size, num_layers):
+        super(LSTMModel, self).__init__()
+        self.hidden_size = hidden_size
+        self.num_layers = num_layers
 
+        # LSTM layer
+        self.lstm = nn.LSTM(input_size, hidden_size, num_layers, batch_first=True)
+
+        # Output layer
+        self.fc = nn.Sequential(
+            nn.Linear(self.hidden_size,1),
+            nn.Sigmoid()
+        )
+
+    def forward(self, x):
+        h0 = torch.zeros(self.num_layers, x.size(0), self.hidden_size).to(x.device)
+        c0 = torch.zeros(self.num_layers, x.size(0), self.hidden_size).to(x.device)
+        out, _ = self.lstm(x, (h0.detach(), c0.detach()))
+        out = self.fc(out[:, -1, :])  # Take the output at the last time step
+        return out
+    
+class RandomNeuronalPopulation(LSTMModel):
+    def __init__(self, model_individuals):
+        super(RandomNeuronalPopulation, self).__init__()
+        self.num_individuals = len(model_individuals)
+        self.individual_models = model_individuals
+    def forward(self, x):
+        outputs = []
+        for model in self.individual_models:
+            outputs.append(round(model(x).item()))
+        element_count = Counter(outputs)
+        
+        output, _ = element_count.most_common(1)[0]
+
+        return output
+    
+class MetaClassifierNN(LSTMModel):
+    def __init__(self, model_individuals):
+        super(MetaClassifierNN, self).__init__()
+        self.num_individuals = len(model_individuals)
+        self.individual_models = model_individuals
+        self.fc = nn.Sequential(
+            nn.Linear(self.num_individuals, 1),
+            nn.Sigmoid()
+        )
+    
+    def forward(self, x):
+        output_list = []
+        for model in self.individual_models:
+            pred = model(x)
+            output_list.append(pred.item())
+        output = torch.Tensor(output_list)
+        output = self.fc(output)
+        return output
+    
 @torch.no_grad()
 #Validation process
 def evaluate(model, val_loader):
