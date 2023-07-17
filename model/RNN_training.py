@@ -1,7 +1,6 @@
 from utils import *
 from data.data_utils import *
 from torch.utils.data.dataloader import DataLoader
-from torch.nn.functional import cross_entropy
 from torch.utils.data import random_split, TensorDataset
 #Hyperparameters
 
@@ -123,3 +122,9 @@ for (train_loader, val_loader) in data_loaders:
 
 torch.save(meta_classifier_1.state_dict(), 'LSTM_RandomNeuronalPopulation.pth')
 torch.save(meta_classifier_2.state_dict(), 'LSTM_MetaClassifierNN.pth')
+
+model_scripted = torch.jit.script(meta_classifier_1) # Export to TorchScript
+model_scripted.save('LSTM_RandomNeuronalPopulation.pt') # Save
+
+model_scripted = torch.jit.script(meta_classifier_2) # Export to TorchScript
+model_scripted.save('LSTM_MetaClassifierNN.pt') # Save
