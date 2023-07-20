@@ -46,8 +46,8 @@ for dataframe in dataframe_list:
     train_ds, val_ds = random_split(dataset , [len(dataset) - val_size, val_size])
 
     #Defining dataloader
-    train_loader = DataLoader(train_ds, batch_size=batch_size, pin_memory=True, num_workers=4, shuffle=True)
-    val_loader = DataLoader(val_ds, batch_size=batch_size*2, pin_memory=True, num_workers=4, shuffle=True)
+    train_loader = DataLoader(train_ds, batch_size=batch_size)
+    val_loader = DataLoader(val_ds, batch_size=batch_size*2)
 
     #to gpu if available
     train_loader = DeviceDataLoader(train_loader, device)
@@ -57,7 +57,6 @@ for dataframe in dataframe_list:
     data_loaders.append((train_loader, val_loader))
 
 #
-
 #training individual models
 models = []
 
@@ -69,15 +68,19 @@ for (train_loader, val_loader) in data_loaders:
     #Training and validation step
     for epoch in tqdm(range(epochs)):
         model.train()
-        for features, targets in train_loader:
-            pred = model(features)
+        for batch in train_loader:
+            features, targets = batch
+            pred = model(features.unsqueeze(0))
+            targets = targets.view(-1, 1)
             train_loss = criterion(pred, targets)
             train_loss.backward()
             opt.step()
             opt.zero_grad()
         model.eval()
-        for features, targets in val_loader:
-            pred = model(features)
+        for batch in val_loader:
+            features, targets = batch
+            pred = model(features.unsqueeze(0))
+            targets = targets.view(-1, 1)
             val_loss = criterion(pred, targets)
             val_acc = accuracy(pred, targets)
             score = F1_score(pred, targets)
@@ -103,20 +106,21 @@ for (train_loader, val_loader) in data_loaders:
         #Training and validation step
         for epoch in tqdm(range(epochs)):
             meta_classifier_2.train()
-            for features, targets in train_loader:
-                pred = meta_classifier_2(features)
-                train_loss = criterion_meta(pred, targets)
-                train_loss.backward()
-                opt.step()
-                opt.zero_grad()
+            for batch in train_loader:
+                for features, targets in batch:
+                    pred = meta_classifier_2(features.unsqueeze(0))
+                    train_loss = criterion_meta(pred, targets)
+                    train_loss.backward()
+                    opt.step()
+                    opt.zero_grad()
             meta_classifier_2.eval()
-            for features, targets in val_loader:
-                pred = meta_classifier_2(features)
-                val_loss = criterion_meta(pred, targets)
-                val_acc = accuracy(pred, targets)
-                score = F1_score(pred, targets)
-                print(f'===============================\nEPOCH: {epoch}\nval_acc: {val_acc} \nf1_score: {score} \nval_loss: {val_loss}\ntrain_loss: {train_loss}\n')
-
+            for batch in val_loader:
+                for features, targets in batch:
+                    pred = meta_classifier_2(features.unsqueeze(0))
+                    val_loss = criterion_meta(pred, targets)
+                    val_acc = accuracy(pred, targets)
+                    score = F1_score(pred, targets)
+                    print(f'===============================\nEPOCH: {epoch}\nval_acc: {val_acc} \nf1_score: {score} \nval_loss: {val_loss}\ntrain_loss: {train_loss}\n')
 
 
 
