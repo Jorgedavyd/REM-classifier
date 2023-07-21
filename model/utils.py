@@ -8,6 +8,7 @@ from sklearn.metrics import accuracy_score
 from tqdm import tqdm
 from collections import Counter
 from sklearn.metrics import f1_score
+from torch.utils.data import Dataset
 
 ##data preprocessing
 def dataframe_to_torch(dataframe, input_cols, output_cols):
@@ -83,12 +84,16 @@ def plot_losses(history):
 
 #Accuracy metric
 def accuracy(outputs, targets):
-    predictions = torch.round(outputs)
+    outputs = outputs.detach().numpy()
+    targets = targets.detach().numpy()
+    predictions = np.round(outputs)
     accuracy_ = torch.from_numpy(np.asarray(accuracy_score(targets, predictions)).astype(np.float32()))
     return accuracy_
 #F1 Score metric
 def F1_score(outputs, targets):
-    predictions = torch.round(outputs)
+    outputs = outputs.detach().numpy()
+    targets = targets.detach().numpy()
+    predictions = np.round(outputs)
     score = torch.from_numpy(np.asarray(f1_score(targets, predictions)).astype(np.float32()))
     return score
 
@@ -138,7 +143,7 @@ def  SingularLayer(input_size, output):
         nn.ReLU(True)
     )
     return out
-
+## Deep Neural Network
 class DeepNeuralNetwork(RemClassificationBase):
     def __init__(self, input_size = 4, *args):
         super(DeepNeuralNetwork, self).__init__()
@@ -158,30 +163,40 @@ class DeepNeuralNetwork(RemClassificationBase):
         out = self.overall_structure(xb)
         out = self.output_layer(out)
         return out
-    
+
+#Sequential approach
 class LSTMModel(nn.Module):
     def __init__(self, input_size, hidden_size, num_layers):
         super(LSTMModel, self).__init__()
         self.hidden_size = hidden_size
         self.num_layers = num_layers
-
+        self.input_size = input_size
         # LSTM layer
-        self.lstm = nn.LSTM(input_size, hidden_size, num_layers, batch_first=True)
-
+        self.lstm = nn.LSTM(input_size, hidden_size, num_layers, batch_first = True)
         # Output layer
         self.fc = nn.Sequential(
             nn.Linear(self.hidden_size,1),
             nn.Sigmoid()
         )
-
     def forward(self, x):
-        h0 = torch.zeros(self.num_layers, x.size(0), self.hidden_size).to(x.device)
-        c0 = torch.zeros(self.num_layers, x.size(0), self.hidden_size).to(x.device)
-        out, _ = self.lstm(x, (h0.detach(), c0.detach()))
-        out = self.fc(out[:, -1, :])  # Take the output at the last time step
-        return out
+        lstm_out, _ = self.lstm(x)
+        output = self.fc(lstm_out[:, -1, :])  # Take the output from the last time step
+        return output    
+## DATASET
+class SequentialDataset(Dataset):
+    def __init__(self, inputs, targets, sequence_length):
+        self.inputs = inputs
+        self.targets = targets
+        self.sequence_length= sequence_length
+    def __len__(self):
+        return len(self.inputs) - self.sequence_length
+    def __getitem__(self, idx):
+        input_sequence = self.inputs[idx:idx + self.sequence_length]
+        target = self.targets[idx + self.sequence_length-1]
+        return input_sequence, target
     
-class RandomNeuronalPopulation(LSTMModel):
+#NEW ARCHITECTURE    
+class RandomNeuronalPopulation():
     def __init__(self, model_individuals):
         super(RandomNeuronalPopulation, self).__init__()
         self.num_individuals = len(model_individuals)
@@ -196,6 +211,7 @@ class RandomNeuronalPopulation(LSTMModel):
 
         return output
     
+#transfer learning/meta learning
 class MetaClassifierNN(LSTMModel):
     def __init__(self, model_individuals):
         super(MetaClassifierNN, self).__init__()
@@ -214,7 +230,7 @@ class MetaClassifierNN(LSTMModel):
         output = torch.Tensor(output_list)
         output = self.fc(output)
         return output
-    
+
 @torch.no_grad()
 #Validation process
 def evaluate(model, val_loader):

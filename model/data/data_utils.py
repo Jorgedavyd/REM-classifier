@@ -11,7 +11,7 @@ def get_individual():
     df = pd.read_csv('data/data.csv')
     
     for i in id_:
-        data = df.loc[df['Unnamed: 0'] == i, :].drop(['Unnamed: 0', 'Unnamed: 1', 'cosine'], axis =1)
+        data = df.loc[df['Unnamed: 0'] == i, :].drop(['Unnamed: 0', 'Unnamed: 1', 'cosine', 'time'], axis =1)
         data_list.append(data)
     
     return data_list
