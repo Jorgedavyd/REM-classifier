@@ -5,18 +5,18 @@ from torch.utils.data import random_split, TensorDataset
 #Hyperparameters
 
 ##individual_classifier
-epochs = 200
+epochs = 10
 opt_ind = torch.optim.Adam
-lr = 1e-5
+lr = 7e-4
 criterion = binary_cross_entropy
-hidden_size = 51  
+hidden_size = 100  
 num_layers = 10   #Number of hidden layers of the internal LSTM
 input_size = 2   #Size of vector
 
 ##metaclassifier
-epochs_meta = 200
+epochs_meta = 100
 opt_meta = torch.optim.Adam
-lr_meta = 1e-5
+lr_meta = 1e-4
 criterion_meta = binary_cross_entropy
 
 #data
@@ -35,7 +35,7 @@ for dataframe in dataframe_list:
     inputs, targets = dataframe_to_torch(dataframe,input_cols, output_cols)
 
     
-    sequence_length = round(len(inputs)/4)
+    sequence_length = round(len(inputs)/5)
 
     #Dataset
     dataset = SequentialDataset(inputs, targets, sequence_length)
@@ -64,33 +64,47 @@ for dataframe in dataframe_list:
 #training individual models
 models = []
 for (train_loader, val_loader) in data_loaders:
+    epochs=50
     #Defining model
     model = to_device(LSTMModel(input_size, hidden_size, num_layers), device)
-    #Defining optimizer
-    opt = opt_ind(model.parameters(), lr=lr)
-    #Training and validation step
-    for epoch in tqdm(range(epochs)):
-        model.train()
-        for batch in train_loader:
-            x, y = batch
-            yhat = model(x)
-            J_train = criterion(yhat, y.unsqueeze(-1))
-            J_train.backward()
-            opt.step()
-            opt.zero_grad()
-        model.eval()
-        for batch in val_loader:
-            x, y = batch
-            yhat = model(x)
-            J_val = criterion(yhat, y.unsqueeze(-1))
-            val_acc = accuracy(yhat, y.unsqueeze(-1))
-            score = F1_score(yhat, y.unsqueeze(-1))
-            print(f'===============================\nEPOCH: {epoch}\nval_acc: {val_acc} \nf1_score: {score} \nval_loss: {J_val}\ntrain_loss: {J_train}\n')
-    for param in model.parameters():
-        param.requires_grad = False
-        
-    models.append(model)
-
+    while True:
+        #Defining optimizer
+        opt = opt_ind(model.parameters(), lr=lr)
+        #Training and validation step
+        for epoch in tqdm(range(epochs)):
+            model.train()
+            for batch in train_loader:
+                x, y = batch
+                yhat = model(x)
+                J_train = criterion(yhat, y.unsqueeze(-1))
+                J_train.backward()
+                opt.step()
+                opt.zero_grad()
+            model.eval()
+            for batch in val_loader:
+                x, y = batch
+                yhat = model(x)
+                J_val = criterion(yhat, y.unsqueeze(-1))
+                val_acc = accuracy(yhat, y.unsqueeze(-1))
+                score = F1_score(yhat, y.unsqueeze(-1))
+                print(f'===============================\nEPOCH: {epoch}\nval_acc: {val_acc} \nf1_score: {score} \nval_loss: {J_val}\ntrain_loss: {J_train}\n')
+        ask = input('1. Change lr.\n2. Train with these hyperparameters for 25 epochs. \n3. Next model.\n4. Restart model.\n')
+        if ask=='1':
+            epochs = int(input('epochs: '))
+            lr=float(input('lr: '))
+            continue
+        elif ask=='2':
+            epochs = 25
+            continue
+        elif ask=='3':
+            for param in model.parameters():
+                param.requires_grad = False
+            models.append(model)
+            break
+        elif ask=='4':
+            epochs = int(input('epochs: '))
+            lr=float(input('lr: '))
+            model = to_device(LSTMModel(input_size, hidden_size, num_layers), device)
 
 meta_classifier_1 = RandomNeuronalPopulation(models)
 meta_classifier_2 = MetaClassifierNN(models)
