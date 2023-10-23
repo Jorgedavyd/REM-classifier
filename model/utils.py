@@ -4,10 +4,8 @@ import matplotlib.pyplot as plt
 from torch.nn.functional import binary_cross_entropy 
 import numpy as np 
 from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import accuracy_score
 from tqdm import tqdm
 from collections import Counter
-from sklearn.metrics import f1_score, recall_score, precision_score
 from torch.utils.data import Dataset
 import pandas as pd
 
@@ -74,38 +72,29 @@ def plot_metrics(history, metric):
     plt.legend()
     plt.show()
 
-#Accuracy metric
 def accuracy(outputs, targets):
-    outputs = outputs.detach().numpy()
-    targets = targets.detach().numpy()
-    predictions = np.round(outputs)
-    score = accuracy_score(targets, predictions)
-    score = torch.tensor(score, dtype = torch.float32)
-    return score
-#F1 Score metric
-def F1_score(outputs, targets):
-    outputs = outputs.detach().numpy()
-    targets = targets.detach().numpy()
-    predictions = np.round(outputs)
-    score = f1_score(targets, predictions, average = 'binary')
-    score = torch.tensor(score, dtype = torch.float32)
-    return score
-#Recall metric
-def Recall(outputs, targets):
-    outputs = outputs.detach().numpy()
-    targets = targets.detach().numpy()
-    predictions = np.round(outputs)
-    score = recall_score(targets, predictions, average = 'binary')
-    score = torch.tensor(score, dtype = torch.float32)
-    return score
-#Precision metric
+    predictions = (outputs > 0.5).float()  # Convertir a 1 si la salida es mayor que 0.5, 0 de lo contrario
+    correct = (predictions == targets).float()
+    accuracy = correct.sum() / correct.numel()
+    return accuracy
+
 def Precision(outputs, targets):
-    outputs = outputs.detach().numpy()
-    targets = targets.detach().numpy()
-    predictions = np.round(outputs)
-    score = precision_score(targets, predictions, average = 'binary')
-    score = torch.tensor(score, dtype = torch.float32)
-    return score
+    true_positives = (outputs * targets).sum()
+    false_positives = (outputs * (1 - targets)).sum()
+    precision = true_positives / (true_positives + false_positives)
+    return precision
+
+def Recall(outputs, targets):
+    true_positives = (outputs * targets).sum()
+    false_negatives = ((1 - outputs) * targets).sum()
+    recall = true_positives / (true_positives + false_negatives)
+    return recall
+
+def F1_score(outputs, targets):
+    precision_value = Precision(outputs, targets)
+    recall_value = Recall(outputs, targets)
+    f1 = 2 * (precision_value * recall_value) / (precision_value + recall_value)
+    return f1
 
 #classification module
 class RemClassificationBase(nn.Module):
@@ -146,10 +135,10 @@ class RemClassificationBase(nn.Module):
                 #Efectuar el descensod e gradiente y borrar el historial
                 optimizer.step()
                 optimizer.zero_grad()
-            #sched step
-            if lr_sched is not None:
-                lrs.append(get_lr(optimizer))
-                sched.step()
+                #sched step
+                if lr_sched is not None:
+                    lrs.append(get_lr(optimizer))
+                    sched.step()
 
             # Fase de validación
             result = evaluate(self, val_loader)
@@ -280,6 +269,30 @@ class DefaultLSTM(RemClassificationBase):
     def forward(self, x):
         lstm_out, (hn,_) = self.lstm(x)
         output = self.fc(lstm_out[:, -1, :])  # Take the output from the last time step
+        return output, hn    
+class DefaultGRU(RemClassificationBase):
+    def __init__(self, input_size, hidden_size, num_layers = 1, dropout = 0.2, bidirectional=True):
+        super(DefaultGRU, self).__init__()
+        self.hidden_size = hidden_size
+        self.num_layers = num_layers
+        self.input_size = input_size
+        # LSTM layer
+        self.gru = nn.GRU(input_size, hidden_size, num_layers, batch_first = True, bidirectional=bidirectional, dropout = dropout)
+        # Output layer
+        if bidirectional:
+            self.fc = nn.Sequential(
+                nn.Linear(self.hidden_size*2,1),
+                nn.Sigmoid()
+            )
+        else:
+            self.fc = nn.Sequential(
+                nn.Linear(self.hidden_size,1),
+                nn.Sigmoid()
+            )
+            
+    def forward(self, x):
+        gru_out, hn = self.gru(x)
+        output = self.fc(gru_out[:, -1, :])  # Take the output from the last time step
         return output, hn    
 
 class DeepLSTM(RemClassificationBase):
