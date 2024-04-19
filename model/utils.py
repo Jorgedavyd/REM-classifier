@@ -8,9 +8,11 @@ from tqdm import tqdm
 from collections import Counter
 from torch.utils.data import Dataset
 import pandas as pd
+from typing import Callable
+from torch import Tensor
 
 @torch.no_grad()
-#Validation process
+#Validation process 
 def evaluate(model, val_loader):
     model.eval()
     outputs = [model.validation_step(batch) for batch in val_loader]
@@ -155,13 +157,13 @@ class RemClassificationBase(nn.Module):
     def training_step(self, batch):
         inputs, targets = batch
         # Reshape target tensor to match the input size
-        out, _ = self(inputs)                  # Generar predicciones
+        out = self(inputs)                  # Generar predicciones
         loss = binary_cross_entropy(out, targets) # Calcular el costo
         return loss
 
     def validation_step(self, batch):
         inputs, targets = batch
-        out,_ = self(inputs)                    # Generar predicciones
+        out = self(inputs)                    # Generar predicciones
         loss = binary_cross_entropy(out, targets)   # Calcular el costo
         acc = accuracy(out, targets) #Calcular la precisión
         score = F1_score(out, targets) 
@@ -396,7 +398,7 @@ class SequentialDataset(Dataset):
         return len(self.inputs) - self.sequence_length
     def __getitem__(self, idx):
         input_sequence = self.inputs[idx:idx + self.sequence_length, :]
-        target = self.targets[idx + self.sequence_length-1]
+        target = self.targets[idx: idx + self.sequence_length]
         return input_sequence, target
 
 class MegaDataset(Dataset):
@@ -418,3 +420,54 @@ class MegaDataset(Dataset):
             index -= sum(len(self.datasets[i]) for i in range(dataset_idx))
 
         return self.datasets[dataset_idx][index]
+    
+
+class ResidualConnection(nn.Module):
+    def __init__(
+            self
+    ):
+        super().__init__()
+
+    def forward(self, x: Tensor, sublayer: Callable) -> Tensor:
+        return sublayer(x) + x
+
+
+class LSTM(nn.LSTM):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+    def forward(self, hn: Tensor):
+        out, _ = super().forward(hn)
+        return out
+
+class ResLSTM(RemClassificationBase):
+    def __init__(
+            self,
+            input_size: int, 
+            hidden_size: int,
+            num_layers: int = 5,
+            dropout: float = 0.
+    ) -> None:
+        super().__init__()
+        self.input_size = input_size
+        self.hidden_size = hidden_size
+        self.num_layers = num_layers
+        # Residual connections
+        self.residual_connections = nn.ModuleList([
+            ResidualConnection() for _ in range(num_layers)
+        ])
+        #first forward pass
+        self.first_lstm = LSTM(input_size,hidden_size, batch_first = True, dropout = dropout)
+        #LSTM modules
+        self.lstm = nn.ModuleList([
+            LSTM(input_size = hidden_size, hidden_size = hidden_size, batch_first = True, dropout = dropout) for _ in range(num_layers)
+        ])
+        self.fc = DeepNeuralNetwork(hidden_size, 64, 32, 1)
+    def forward(self, x: Tensor) -> Tensor:
+        x = self.first_lstm(x)
+
+        for connection, layer in zip(self.residual_connections, self.lstm):
+            x = connection(x, lambda x: layer(x))
+
+        x = self.fc(x)
+        
+        return x
