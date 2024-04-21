@@ -272,6 +272,7 @@ class DefaultLSTM(RemClassificationBase):
         lstm_out, (hn,_) = self.lstm(x)
         output = self.fc(lstm_out[:, -1, :])  # Take the output from the last time step
         return output, hn    
+
 class DefaultGRU(RemClassificationBase):
     def __init__(self, input_size, hidden_size, num_layers = 1, dropout = 0.2, bidirectional=True):
         super(DefaultGRU, self).__init__()
@@ -421,7 +422,6 @@ class MegaDataset(Dataset):
 
         return self.datasets[dataset_idx][index]
     
-
 class ResidualConnection(nn.Module):
     def __init__(
             self
@@ -430,7 +430,6 @@ class ResidualConnection(nn.Module):
 
     def forward(self, x: Tensor, sublayer: Callable) -> Tensor:
         return sublayer(x) + x
-
 
 class LSTM(nn.LSTM):
     def __init__(self, *args, **kwargs):
